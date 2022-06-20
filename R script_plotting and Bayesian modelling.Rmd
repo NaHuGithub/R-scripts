@@ -1,0 +1,245 @@
+---
+title: "Plotting "
+author: "NH"
+date: "20201120"
+output: pdf_document
+---
+
+```{r}
+load("") # Path
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# load the package and the data
+```{r}
+library(brms)
+library(dplyr)
+E4_30P <- read.csv(file = "", header = TRUE)
+E4_30P$subjectivity <- as.factor(E4_30P$subjectivity)
+E4_30P$gender <- as.factor(E4_30P$gender)
+E4_30P$subject <- as.character(E4_30P$subject)
+E4_30P$item <- as.character(E4_30P$item)
+# Sum contrast coding
+contrasts(E4_30P$subjectivity) <- c(-0.5,+0.5)
+contrasts(E4_30P$gender) <- c(-0.5,+0.5)
+str(E4_30P)
+```
+
+## Distribution of daardoor and dus
+```{r}
+library(dplyr)
+library(ggplot2)
+library(viridis)
+dfp <- E4_30P %>% group_by(subjectivity) %>% count(connective)
+p <- ggplot(dfp, aes(x = subjectivity, y = n)) +
+  geom_bar(
+    aes(color = connective, fill = connective),
+    stat = "identity", position = position_dodge(0.8),
+    width = 0.3) +
+  geom_text(position = position_dodge(0.8), aes(label = n, fill=connective), vjust = -0.5, size=3.5) +
+  theme_classic() +
+  scale_color_viridis(discrete = TRUE, option = "D", direction = -1)+
+  scale_fill_viridis(discrete = TRUE, direction = -1) +
+  theme(legend.position="bottom") +
+  theme(legend.title = element_text(face="bold"))
+print(p)
+
+E4_30P <- E4_30P %>% filter(fluency == "flu")
+```
+
+## Distribution of daardoor and dus by participant
+```{r}
+# by subject
+dfq <- E4_30P %>% count(subject, subjectivity, connective)
+q <- ggplot(dfq, aes(x = subjectivity, y = n, color = connective)) +
+  geom_bar(
+    aes(color = connective, fill = connective),
+    stat = "identity", position = position_dodge(0.8,preserve = "single"),
+    width = 0.5
+  ) +
+  facet_wrap(~subject)
+  
+print(q)
+```
+
+## Get connective counts in the objective condition
+```{r eval=FALSE}
+library(tidyr)
+library(dplyr)
+# Get connective counts in the objective condition
+dfo <- E4_30P %>% filter(subjectivity == "O")
+dfo_count <- dfo %>% count(subject, connective)
+dfo_count_wide <- dfo_count %>% spread(connective, n)
+dfo_count_wide <- dfo_count_wide %>% rename(O_daardoor = daardoor, O_dus = dus, O_maar = maar)
+# Get connective counts in the subjective condition
+dfs <- E4_30P %>% filter(subjectivity == "S")
+dfs_count <- dfs %>% count(subject, connective)
+dfs_count_wide <- dfs_count %>% spread(connective, n)
+dfs_count_wide <- dfs_count_wide %>% rename(S_daardoor = daardoor, S_dus = dus, S_maar = maar)
+# combine tables
+dfos_count <- bind_cols(dfo_count_wide, dfs_count_wide)
+dfos_count <- select(dfos_count, -c(5))
+dfos_count[is.na(dfos_count)] = 0
+dfos_count <- dfos_count %>% rename(subject = subject...1)
+
+library(ggrepel)
+dfo_plot <- ggplot(dfos_count, aes(x=O_dus, y=O_daardoor)) + 
+  geom_point(aes(colour = O_daardoor), size = 2) + 
+  geom_text_repel(aes(colour = O_daardoor), label=dfos_count$subject, size = 3) +
+  theme_classic()+
+  scale_color_viridis(option = "D", direction = -1)+
+  scale_fill_viridis() +
+  theme(legend.position="bottom") +
+  theme(legend.title = element_text(face="bold"))
+
+print(dfo_plot)
+```
+
+
+## Calculate Odds ratio
+### Log odds
+
+```{r logodds.fnc}
+
+logodds <- function( hit, miss ) {
+  h <- ifelse( (hit==0|miss==0),  hit+0.5,  hit ) # add 0.5 to hit and to miss
+  m <- ifelse( (hit==0|miss==0), miss+0.5, miss ) # idem
+  result <- ifelse( hit==0 & miss==0, NA, log(h/m) )
+  return( result )
+}
+```
+
+
+## Odds Ratio
+
+The following function uses the two log odds, calculated above, to compute an Odds Ratio. 
+This involves some jiggling with the log transformation. 
+First, we undo the log transformation of the two input parameters, then compute the odds, then do the log transformation on the result. 
+
+```{r OR.fnc}
+OR <- function( LO1, LO2 ) {
+  result <- log( exp(LO1)/exp(LO2) )
+  return( result ) 
+}
+```
+
+
+```{r eda.3}
+dfos_count <- mutate(dfos_count, O.logodds = logodds(O_daardoor,O_dus), S.logodds = logodds(S_daardoor,S_dus), OR = OR(O.logodds,S.logodds))
+var(dfos_count$OR)
+# The variance of the OR is 3.702779.
+
+# Making the plot
+logOR_plot_point <- ggplot(dfos_count, aes(x = reorder(subject, -OR), y = OR)) +
+  geom_point(aes(colour = OR), stat = "identity",size = 2) +
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme_classic() +
+  scale_color_viridis(option = "D", direction = -1) +
+  scale_fill_viridis() +
+  theme(legend.position="bottom") +
+  theme(legend.title = element_text(face="bold"))
+
+plot(logOR_plot_point)
+
+# Combine tables
+E4_30P <- full_join(E4_30P, dfos_count, by = "subject")
+E4_30P <- select(E4_30P, -c("O_daardoor", "O_dus", "O_maar", "S_daardoor", "S_dus", "S_maar"))
+```
+
+
+Note that this figure is quite similar to the one above (which makes sense, see chunk `eda.1`), with the exception of the second participant, S13. 
+
+
+
+```{r}
+# Combining plots
+library(patchwork)
+aa <- (p|((dfo_plot + plot_layout(guides = "keep"))/logOR_plot_point)) + plot_layout(guides = "collect") & theme(legend.position = 'bottom')
+aa <- aa + plot_annotation(tag_levels = "A") + plot_layout( widths = c(1,3), heights = c(1,1)) 
+
+print(aa)
+ggsave("aa.png")
+```
+
+
+
+
+
+# Building models
+## 1. seg1pitchMaxst
+```{r}
+## m1: gender:OR:subjectivity
+### SD_1
+prior_E4_seg1pitchMaxst_m1.1 <- c(set_prior("normal(0,50)", class = "b", coef = "gender1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:OR"),
+                                  set_prior("normal(0,1)", class = "b", coef = "gender1:OR:subjectivity1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "OR"),
+                                  set_prior("normal(0,5)", class = "b", coef = "OR:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "subjectivity1"),
+              set_prior("normal(0,100)", class = "Intercept"),
+              set_prior("normal(0,10)", class = "sd"),
+              set_prior("normal(0,10)", class = "sigma"))
+E4_seg1pitchMaxst_m1.1 <- brm(seg1pitchMaxst ~ gender + OR + subjectivity + gender:OR + gender:subjectivity + OR:subjectivity + gender:OR:subjectivity + (1|subject) + (1|item),
+  data = E4_30P, prior = prior_E4_seg1pitchMaxst_m1.1, family = gaussian(), warmup = 2000, iter = 10000, chains = 4, cores = 2, save_all_pars = TRUE, control = list(adapt_delta = .99, max_treedepth = 15))
+
+### SD_3
+prior_E4_seg1pitchMaxst_m1.2 <- c(set_prior("normal(0,50)", class = "b", coef = "gender1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:OR"),
+                                  set_prior("normal(0,3)", class = "b", coef = "gender1:OR:subjectivity1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "OR"),
+                                  set_prior("normal(0,5)", class = "b", coef = "OR:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "subjectivity1"),
+              set_prior("normal(0,100)", class = "Intercept"),
+              set_prior("normal(0,10)", class = "sd"),
+              set_prior("normal(0,10)", class = "sigma"))
+E4_seg1pitchMaxst_m1.2 <- brm(seg1pitchMaxst ~ gender + OR + subjectivity + gender:OR + gender:subjectivity + OR:subjectivity + gender:OR:subjectivity + (1|subject) + (1|item),
+  data = E4_30P, prior = prior_E4_seg1pitchMaxst_m1.2, family = gaussian(), warmup = 2000, iter = 10000, chains = 4, cores = 2, save_all_pars = TRUE, control = list(adapt_delta = .99, max_treedepth = 15))
+
+### SD_5
+prior_E4_seg1pitchMaxst_m1.3 <- c(set_prior("normal(0,50)", class = "b", coef = "gender1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:OR"),
+                                  set_prior("normal(0,5)", class = "b", coef = "gender1:OR:subjectivity1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "OR"),
+                                  set_prior("normal(0,5)", class = "b", coef = "OR:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "subjectivity1"),
+              set_prior("normal(0,100)", class = "Intercept"),
+              set_prior("normal(0,10)", class = "sd"),
+              set_prior("normal(0,10)", class = "sigma"))
+E4_seg1pitchMaxst_m1.3 <- brm(seg1pitchMaxst ~ gender + OR + subjectivity + gender:OR + gender:subjectivity + OR:subjectivity + gender:OR:subjectivity + (1|subject) + (1|item),
+  data = E4_30P, prior = prior_E4_seg1pitchMaxst_m1.3, family = gaussian(), warmup = 2000, iter = 10000, chains = 4, cores = 2, save_all_pars = TRUE, control = list(adapt_delta = .99, max_treedepth = 15))
+```
+
+```{r}
+## m2: without gender:OR:subjectivity
+### gender1:OR_SD_5
+prior_E4_seg1pitchMaxst_m2.1 <- c(set_prior("normal(0,50)", class = "b", coef = "gender1"), 
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:OR"),
+                                  set_prior("normal(0,15)", class = "b", coef = "gender1:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "OR"),
+                                  set_prior("normal(0,5)", class = "b", coef = "OR:subjectivity1"),
+                                  set_prior("normal(0,15)", class = "b", coef = "subjectivity1"),
+              set_prior("normal(0,100)", class = "Intercept"),
+              set_prior("normal(0,10)", class = "sd"),
+              set_prior("normal(0,10)", class = "sigma"))
+E4_seg1pitchMaxst_m2.1 <- brm(seg1pitchMaxst ~ gender + OR + subjectivity + gender:OR + gender:subjectivity + OR:subjectivity + (1|subject) + (1|item),
+  data = E4_30P, prior = prior_E4_seg1pitchMaxst_m2.1, family = gaussian(), warmup = 2000, iter = 10000, chains = 4, cores = 2, save_all_pars = TRUE, control = list(adapt_delta = .99, max_treedepth = 15))
+
+```
+
+```{r}
+# Calculating Bayes factors
+BF10_E4_seg1pitchMaxst_m1.1m2.1 <- bayes_factor(E4_seg1pitchMaxst_m1.1, E4_seg1pitchMaxst_m2.1)
+BF10_E4_seg1pitchMaxst_m1.2m2.1 <- bayes_factor(E4_seg1pitchMaxst_m1.2, E4_seg1pitchMaxst_m2.1)
+BF10_E4_seg1pitchMaxst_m1.3m2.1 <- bayes_factor(E4_seg1pitchMaxst_m1.3, E4_seg1pitchMaxst_m2.1)
+# Estimated Bayes factor in favor of E4_seg1pitchMaxst_m1.1 over E4_seg1pitchMaxst_m2.1 is lower than 1. Hence, gender:OR:subjectivity is not supported. 
+```
+
+
